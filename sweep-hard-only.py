@@ -7,10 +7,10 @@ import numpy as np
 
 import time
 from pynput.mouse import Button, Controller
-
+import async_key_listener
 
 def find_game(im, square_colors, thresh):
-    """finds the game rect on the screen"""
+    """finds the dimensions of the game rect on the screen"""
     match = find_color_match(im, square_colors, thresh)
     if match is None:
         return None
@@ -18,7 +18,7 @@ def find_game(im, square_colors, thresh):
 
 
 def find_color_match(im, colors, thresh) -> np.ndarray:
-    """finds the first pixel in an image that matches one of the colors"""
+    """finds the first pixel in an image that matches one of the colors (at sample a reduced sample rate)"""
     w, h = im.size
     step = 20
 
@@ -123,14 +123,13 @@ def read_square_values(
         game_rect: Tuple[np.ndarray, np.ndarray],
         sqare_count: np.ndarray,
         squares_to_read: Collection[Tuple[int, int]],
-        grass_colors, dirt_colors, thresh,
         num_images: Dict[int, Tuple[np.ndarray, np.ndarray]]):
     """reads all numbers from squares in an image at given positions and returns them in a dict"""
     square_size = game_rect[1] / sqare_count
     square_values = {}
 
     padding = np.array([2, 2])
-    print("reading numbers... (sry this is super slow)")
+    print("reading numbers...")
 
     # draw = ImageDraw.Draw(im)
     for square in squares_to_read:
@@ -143,48 +142,10 @@ def read_square_values(
         frame = [*square_min, *square_max]
         square_im = im.crop(frame)
 
-        avg_color = get_avg_color(square_im)
-        # is_covered = is_square_covered(square_im, grass_colors, thresh)
-        # draw.rectangle([tuple(square_min), tuple(square_max)], outline="red", width=1)
-
-        if is_square_covered(avg_color, grass_colors, thresh):
-            value = -1
-        elif is_square_zero(avg_color, dirt_colors, thresh):
-            value = 0
-        else:
-            value = read_square_num(square_im, num_images)
+        value = read_square_num(square_im, num_images)
         square_values[tuple(square)] = value
     # im.show()
     return square_values
-
-
-def is_square_covered(avg_color, grass_colors, thresh) -> bool:
-    """returns true if the average color of a square is a grass color"""
-    color_match, _ = get_closest_color(avg_color, grass_colors, thresh)
-    return color_match != -1
-
-
-def is_square_zero(avg_color, dirt_colors, thresh) -> bool:
-    """returns true if the average color of a square is a dirt color"""
-    color_match, _ = get_closest_color(avg_color, dirt_colors, thresh)
-    return color_match != -1
-
-
-def get_avg_color(im) -> Tuple[int, int, int]:
-    """returns the average color of an image"""
-    r, g, b = 0, 0, 0
-    for pixel in im.getdata():
-        red, green, blue = pixel
-        r += red
-        g += green
-        b += blue
-
-    w, h = im.size
-    total_pixels = w * h
-    avg_r = r // total_pixels
-    avg_g = g // total_pixels
-    avg_b = b // total_pixels
-    return avg_r, avg_g, avg_b
 
 
 def read_square_num(im, num_img_arrays: Dict[int, Tuple[np.ndarray, np.ndarray]]) -> int:
@@ -219,10 +180,10 @@ def load_num_images() -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
     all_nums_img = Image.open("res/numbers.png")
     square_len = 21
 
-    for i in range(6):
+    for i in range(11):
         img1 = all_nums_img.crop((i * square_len, 0, (i + 1) * square_len, square_len))
         img2 = all_nums_img.crop((i * square_len, square_len, (i + 1) * square_len, 2 * square_len))
-        num_img_arrays[i + 1] = (np.array(img1), np.array(img2))
+        num_img_arrays[i - 1] = (np.array(img1)[:, :, :3], np.array(img2)[:, :, :3])
 
     return num_img_arrays
 
@@ -283,15 +244,12 @@ def locate_screen_game(grass_colors, dirt_colors, border_colors, thresh, num_ima
         game_rect,
         my_game.size,
         my_game.covered_squares,
-        grass_colors,
-        dirt_colors,
-        thresh,
         num_images)
     my_game.update(new_values)
     return game_rect, my_game
 
 
-def update_game(my_game, game_rect, grass_colors, dirt_colors, thresh, num_images):
+def update_game(my_game, game_rect, num_images):
     """updates the game object with newly read square values of the game on the screen"""
     im = ImageGrab.grab().convert("RGB")
     new_values = read_square_values(
@@ -299,9 +257,6 @@ def update_game(my_game, game_rect, grass_colors, dirt_colors, thresh, num_image
         game_rect,
         my_game.size,
         my_game.covered_squares,
-        grass_colors,
-        dirt_colors,
-        thresh,
         num_images)
     my_game.update(new_values)
 
@@ -325,7 +280,9 @@ def main():
     if len(my_game.covered_squares) == size[0] * size[1]:
         reveal_neighbors(game_rect, my_game.size, (size[0] // 2, size[1] // 2))
         time.sleep(1)
-        update_game(my_game, game_rect, grass_colors, dirt_colors, thresh, num_images)
+        update_game(my_game, game_rect, num_images)
+
+    async_key_listener.listen_for_ctrl_c()
 
     while True:
         no_mines_left = False
@@ -355,7 +312,7 @@ def main():
             reveal_neighbors(game_rect, my_game.size, click_square)
 
         time.sleep(1)
-        update_game(my_game, game_rect, grass_colors, dirt_colors, thresh, num_images)
+        update_game(my_game, game_rect, num_images)
         print("\n", my_game, sep="")
 
 
